@@ -28,12 +28,6 @@ struct client_connection {
     int alive;
 } ;
 
-typedef struct {
-    client_connection from;
-    char* content;
-    client_connection to;
-    int sid_to;
-} socket_message;
 
 #define BUFFER_LENGTH 1024
 
@@ -120,110 +114,63 @@ void handle_connection(client_connection client_connection)
 }
 
 
-
-socket_message msg_from_buffer(char* buffer, client_connection from)
-{
-    socket_message msg;
-    client_connection client_connection;
-    int i, j, k, ascii_code;
-    char message[1000] = {0};
-    char to_str[5] = {0};
-    int map_message;
-
-    msg.from = from;
-    map_message = 1;
-    j = 0;
-    k = 0;
-    for(int i = 0; buffer[i] != '\0'; i++) {
-        if (buffer[i] == ';') {
-            map_message = 0;
-            continue;
-        }
-        if (map_message) {
-            message[j++] = buffer[i];
-        } else if (isdigit(buffer[i])) {
-            to_str[k++] = buffer[i];
-        }
-    }
-    strcat(message, "\n");
-    msg.content = message;
-    msg.sid_to = atoi(to_str);
-
-    for(int i = 0; i < 10000; i++) {
-        client_connection = from.client_connections[i];
-        if (client_connection.alive && client_connection.socket_fd == msg.sid_to) {
-            msg.to = client_connection;
-            return msg;
-        }
-    }
-
-    msg.sid_to = 0; // In case of failure or invalid destination
-    return msg;
-}
-
-int send_message(socket_message msg)
-{
-    printf("Sending message: %s\n", msg.content);
-    return send(msg.to.socket_fd, msg.content, strlen(msg.content), 0);
-}
-
 void* handle_connection_routine(void *client_connection_void_ptr)
 {
     client_connection *client_connection_ptr = client_connection_void_ptr;
     client_connection client_connection = *client_connection_ptr;
-    socket_message msg;
     int buffer_bytes;
 
     printf("Starting Thread from client %d\n", client_connection.socket_fd);
 
-    msg.content = "0\n";
-    msg.to = client_connection;
-    msg.sid_to = client_connection.socket_fd;
+    // char resp[1000] = "HTTP/1.1 200 OK\nDate: Mon, 23 May 2005 22:38:34 GMT\nServer: Apache/1.3.27 (Unix)  (Red-Hat/Linux)\nLast-Modified: Wed, 08 Jan 2003 23:11:55 GMT\nEtag: \"3f80f-1b6-3e1cb03b\"\nAccept-Ranges: bytes\nContent-Length: 16\nConnection: close\nContent-Type: text/html; charset=UTF-8\n\n<html>abc</html>";
+    char resp[1000] = "HTTP/2 200 OK\n\n<html><script>alert(\"Hello!\")</script><html>";
+    /*
+        $http_version $status_code $reason
+        (empty line)
+        $content
 
-    if (send_message(msg) == -1) {
-        printf("Failure on communication with client.\n");
-    }
+        Example:
+        HTTP/2 200 OK
+
+        <html>I am a HTML Page<html>
+    */
+
 
     for (char buffer[BUFFER_LENGTH] = { 0 };; memset(buffer, 0x0, BUFFER_LENGTH)) {
         buffer_bytes = read(client_connection.socket_fd, buffer, 1024);
         if (buffer_bytes) {
-            printf("%s:%d says: %s\n", client_connection.ip, ntohs(client_connection.address.sin_port), buffer);
-            msg = msg_from_buffer(buffer, client_connection);
-            if (msg.sid_to) {
-                if (send_message(msg) > 0) {
-                    printf("Message sent successfully.\n");
-                } else {
-                    printf("Failure on message sending.\n");
-                }
-            } else {
-                printf("Unavailable destination.\n");
+
+            for (int i = 0; i < 99999999; i++) {
+                // io or cpu bound simulation
             }
+
+            printf("%s:%d says: %s\n", client_connection.ip, ntohs(client_connection.address.sin_port), buffer);
+            send(client_connection.socket_fd, resp, strlen(resp), 0);
+            client_connection.alive = 0;
+            close(client_connection.socket_fd);
+            printf("Connection closed with %d.\n", client_connection.socket_fd);
+            pthread_exit(NULL);
         }
-        if (!strcmp(buffer, "\r\n")) break;
     }
-    client_connection.alive = 0;
-    close(client_connection.socket_fd);
-    printf("Connection closed with %d.\n", client_connection.socket_fd);
 }
 
 void handle_connections(host_config host_config)
 {
-    client_connection *client_connections;
+    client_connection client_connection;
     int max_connections;
     int i;
     pthread_t *threads;
 
-    max_connections = 10000;
-    client_connections = (client_connection *) malloc(sizeof(client_connection) * max_connections);
+    max_connections = 100;
+    // client_connections = (client_connection *) malloc(sizeof(client_connection) * max_connections);
     threads = (pthread_t *) malloc(sizeof(pthread_t) * max_connections);
 
     for (i = 0;;) {
-        client_connections[i] = incoming_connection(host_config);
-        client_connections[i].client_connections = client_connections;
-        pthread_create(&threads[i], NULL, handle_connection_routine, (void *) &client_connections[i]);
-        i++;
+        client_connection = incoming_connection(host_config);
+        pthread_create(&threads[i], NULL, handle_connection_routine, (void *) &client_connection);
     }
-    free(client_connections);
+    // free(client_connections);
+    free(threads);
     shutdown(host_config.socket_fd, SHUT_RDWR);
 }
 
